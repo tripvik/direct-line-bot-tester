@@ -8,10 +8,9 @@
     <title>Web Chat Direct Line Token Demo</title>
     <script crossorigin="anonymous" src="https://cdn.botframework.com/botframework-webchat/latest/webchat.js"></script>
 
-    <!-- This styling is for Web Chat demonstration purposes -->
     <style type="text/css">
-      html,
-      body {
+      html, body {
+        font-family: Arial, sans-serif;
         background-color: #f7f7f7;
         height: 100%;
         display: flex;
@@ -20,22 +19,17 @@
         margin: 0;
       }
 
-      body {
-        background-position: 100% 100%;
-        background-repeat: no-repeat;
-        background-size: auto 50%;
-      }
-
       #inputContainer {
         text-align: center;
         margin-bottom: 20px;
       }
 
-      #bearerSecret {
+      #directLineSecret, #botUrl {
         padding: 10px;
         border-radius: 4px;
         border: 1px solid #ccc;
         width: 300px;
+        margin-bottom: 10px;
       }
 
       #startButton {
@@ -55,14 +49,36 @@
         width: 500px;
         display: none;
       }
+
+      #errorMessage {
+        color: red;
+        font-size: 14px;
+        display: none;
+        margin-bottom: 10px;
+      }
+
+      #useAppServiceExtension {
+        margin-bottom: 10px;
+      }
+
+      label {
+        font-family: Arial, sans-serif;
+        font-size: 14px;
+      }
     </style>
   </head>
   <body>
     <noscript>You need to enable JavaScript to run this app.</noscript>
     
     <div id="inputContainer">
-      <input type="text" id="bearerSecret" placeholder="Enter Bearer Secret" />
+      <input type="text" id="directLineSecret" placeholder="Enter Direct Line Secret" />
+      <input type="text" id="botUrl" placeholder="Enter Bot URL (for App Service Extension)" style="display: none;" />
+      <div>
+        <input type="checkbox" id="useAppServiceExtension" />
+        <label for="useAppServiceExtension">Using Direct Line ASE?</label>
+      </div>
       <button id="startButton" onclick="startBotSession()">Start Bot Session</button>
+      <div id="errorMessage"></div>
     </div>
     <div id="webchat"></div>
 
@@ -74,70 +90,122 @@
       }
 
       async function fetchJSON(url, options = {}) {
-        const res = await fetch(url, {
-          ...options,
-          headers: {
-            ...options.headers,
-            accept: 'application/json'
+        try {
+          const res = await fetch(url, {
+            ...options,
+            headers: {
+              ...options.headers,
+              accept: 'application/json'
+            }
+          });
+
+          if (!res.ok) {
+            throw new Error(`Failed to fetch JSON (Status: ${res.status})`);
           }
-        });
 
-        if (!res.ok) {
-          throw new Error(`Failed to fetch JSON due to ${res.status}`);
+          return await res.json();
+        } catch (error) {
+          throw new Error(`Network error: ${error.message}`);
         }
-
-        return await res.json();
       }
 
-      async function generateToken(secret) {
+      async function generateToken(secret, useAppServiceExtension, botUrl) {
         const tokenRequestBody = {
-          user: {
-            id: generateRandomUserId() // Generate a random user ID
-          }
+          user: { id: generateRandomUserId() }
         };
 
-        const response = await fetch("https://directline.botframework.com/v3/directline/tokens/generate", {
-          method: "POST",
-          headers: {
-            "Authorization": `Bearer ${secret}`,
-            "Content-Type": "application/json"
-          },
-          body: JSON.stringify(tokenRequestBody)
-        });
+        const url = useAppServiceExtension
+          ? `${normalizeBotUrl(botUrl)}/v3/directline/tokens/generate`
+          : "https://directline.botframework.com/v3/directline/tokens/generate";
 
-        if (!response.ok) {
-          throw new Error(`Failed to generate token: ${response.statusText}`);
+        try {
+          const response = await fetch(url, {
+            method: "POST",
+            headers: {
+              "Authorization": `Bearer ${secret}`,
+              "Content-Type": "application/json"
+            },
+            body: JSON.stringify(tokenRequestBody)
+          });
+
+          if (!response.ok) {
+            throw new Error(`Failed to generate token (Status: ${response.status}: ${response.statusText})`);
+          }
+
+          const data = await response.json();
+          return data.token;
+        } catch (error) {
+          throw new Error(`Error generating token: ${error.message}`);
         }
+      }
 
-        const data = await response.json();
-        return data.token;
+      function normalizeBotUrl(url) {
+        url = url.trim();
+        if (!url.endsWith('/.bot')) {
+          url = url.replace(/\/$/, '') + '/.bot';
+        }
+        return url;
+      }
+
+      function showError(message) {
+        const errorMessageDiv = document.getElementById('errorMessage');
+        errorMessageDiv.style.display = 'block';
+        errorMessageDiv.textContent = message;
+      }
+
+      function hideError() {
+        const errorMessageDiv = document.getElementById('errorMessage');
+        errorMessageDiv.style.display = 'none';
+        errorMessageDiv.textContent = '';
       }
 
       async function startBotSession() {
-        const secret = document.getElementById('bearerSecret').value;
+        hideError();
+        const secret = document.getElementById('directLineSecret').value.trim();
+        const useAppServiceExtension = document.getElementById('useAppServiceExtension').checked;
+        const botUrl = document.getElementById('botUrl').value.trim();
+
         if (!secret) {
-          alert('Please enter a bearer secret');
+          showError('Please enter a valid Direct Line secret.');
+          return;
+        }
+
+        if (useAppServiceExtension && !botUrl) {
+          showError('Please enter a bot URL when using the Direct Line App Service Extension.');
           return;
         }
 
         try {
-          const token = await generateToken(secret);
+          const token = await generateToken(secret, useAppServiceExtension, botUrl);
           document.getElementById('inputContainer').style.display = 'none';
           document.getElementById('webchat').style.display = 'block';
-          WebChat.renderWebChat(
+
+          let directLineOptions;
+          if (useAppServiceExtension) {
+            directLineOptions = await window.WebChat.createDirectLineAppServiceExtension({
+              domain: `${normalizeBotUrl(botUrl)}/v3/directline`,
+              token
+            });
+          } else {
+            directLineOptions = window.WebChat.createDirectLine({ token });
+          }
+
+          window.WebChat.renderWebChat(
             {
-              directLine: WebChat.createDirectLine({ token }),
-              styleOptions: {
-                backgroundColor: 'rgba(255, 255, 255, .8)'
-              }
+              directLine: directLineOptions,
+              styleOptions: { backgroundColor: 'rgba(255, 255, 255, .8)' }
             },
             document.getElementById('webchat')
           );
         } catch (err) {
           console.error(err);
-          alert('Failed to start bot session');
+          showError(`Failed to start bot session: ${err.message}`);
         }
       }
+
+      document.getElementById('useAppServiceExtension').addEventListener('change', function() {
+        document.getElementById('botUrl').style.display = this.checked ? 'block' : 'none';
+      });
     </script>
     <div id="root"></div>
   </body>
