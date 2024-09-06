@@ -54,7 +54,7 @@
         color: red;
         font-size: 14px;
         display: none;
-        margin-bottom: 10px;
+        margin: 15px 0;
       }
 
       #useAppServiceExtension {
@@ -204,7 +204,7 @@
       }
 
       document.getElementById('useAppServiceExtension').addEventListener('change', function() {
-        document.getElementById('botUrl').style.display = this.checked ? 'block' : 'none';
+        document.getElementById('botUrl').style.display = this.checked ? 'initial' : 'none';
       });
     </script>
     <div id="root"></div>
